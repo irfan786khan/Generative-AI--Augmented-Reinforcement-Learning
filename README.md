@@ -30,7 +30,7 @@ This project combines advanced reinforcement learning with materials science to 
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/your-username/perovskite-stability-predictor.git
+git clone [https://github.com/your-username](https://github.com/irfan786khan/Generative-AI--Augmented-Reinforcement-Learning)/perovskite-stability-predictor.git
 cd perovskite-stability-predictor
 ```
 
