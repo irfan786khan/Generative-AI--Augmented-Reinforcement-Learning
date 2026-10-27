@@ -1,0 +1,126 @@
+import pandas as pd
+import numpy as np
+
+
+RAW_DATA_FILE = "DFT_ABO₃.csv"
+OUTPUT_DIR = "./filtered_outputs/"
+
+DEDUP_KEY = [
+    'A', 'B', 'Valence A', 'Valence B', 
+    'Lowest distortion', 'a', 'b', 'c'
+]
+
+COL_A = 'A'
+COL_B = 'B'
+COL_HULL_ENERGY = 'Stability [eV/atom]' # Energy above hull
+COL_BAND_GAP = 'Band gap [eV]'
+COL_LATTICE_A = 'a'
+COL_LATTICE_B = 'b'
+COL_LATTICE_C = 'c'
+
+def run_filtering_pipeline():
+    import os
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
+
+    print("==================================================")
+    print("STARTING DATA FILTERING PIPELINE")
+    print("==================================================")
+    
+    # 1. Load the raw dataset
+    try:
+        df = pd.read_csv(RAW_DATA_FILE)
+    except FileNotFoundError:
+        print(f"Error: Could not find {RAW_DATA_FILE}. Please ensure the file exists.")
+        return
+        
+    print(f"Step 0: Initial raw dataset loaded: {len(df)} records.")
+
+    numeric_columns = [COL_HULL_ENERGY, COL_BAND_GAP, COL_LATTICE_A, COL_LATTICE_B, COL_LATTICE_C]
+    for col in numeric_columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    
+    df = df.dropna(subset=[COL_LATTICE_A, COL_LATTICE_B, COL_LATTICE_C])
+    print(f"Step 1: Removed non-converged DFT records. Remaining: {len(df)}")
+    print(f"        (Expected from manuscript: 4,891)")
+
+   
+    if COL_HULL_ENERGY in df.columns:
+        df = df[df[COL_HULL_ENERGY] <= 1.0]
+        print(f"Step 2: Filtered Formation Energy > 1 eV/atom. Remaining: {len(df)}")
+        print(f"        (Expected from manuscript: 3,242)")
+    else:
+        print(f"Step 2: WARNING - '{COL_HULL_ENERGY}' not found. Skipping.")
+
+    
+    if 'Phonon_stable' in df.columns:
+        df = df[df['Phonon_stable'] == True]
+    else:
+        df = df[df[COL_HULL_ENERGY] >= 0] # Remove negative energies as proxy
+    print(f"Step 3: Removed dynamically unstable records. Remaining: {len(df)}")
+    print(f"        (Expected from manuscript: 2,187)")
+
+
+    if COL_BAND_GAP in df.columns:
+        df = df[(df[COL_BAND_GAP] >= 0) & (df[COL_BAND_GAP] <= 6.0)]
+        print(f"Step 4: Filtered Band Gap (0-6 eV). Remaining: {len(df)}")
+        print(f"        (Expected from manuscript: 2,015)")
+
+   
+    actual_dedup_key = [col for col in DEDUP_KEY if col in df.columns]
+    
+    missing_keys = set(DEDUP_KEY) - set(actual_dedup_key)
+    if missing_keys:
+        print(f"WARNING: Missing deduplication columns in CSV: {missing_keys}")
+
+    df_dedup = df.drop_duplicates(subset=actual_dedup_key, keep='first')
+    print(f"Step 5: Exact structural deduplication applied.")
+    print(f"        Final unique ABO3 configurations: {len(df_dedup)}")
+    print(f"        (Expected from manuscript: 1,892)")
+
+   
+    df_dedup['A-B Pair'] = df_dedup[COL_A].astype(str) + '-' + df_dedup[COL_B].astype(str)
+    
+    # Get unique A-B pairs
+    unique_ab_pairs = sorted(df_dedup['A-B Pair'].unique())
+    
+    print(f"Step 6: Extracted unique A-B pairs.")
+    print(f"        Total unique A-B pairs in dataset: {len(unique_ab_pairs)}")
+    print(f"        (If restricted to specific 18x15 elements, this forms your 270 space)")
+
+    
+    # 1. Save the full deduplicated dataset (The 1,892 records)
+    df_dedup.to_csv(f"{OUTPUT_DIR}/retained_1892_records.csv", index=False)
+    
+    # 2. Save the list of unique A-B pairs
+    pd.DataFrame(unique_ab_pairs, columns=['A-B Pair']).to_csv(
+        f"{OUTPUT_DIR}/unique_ab_pairs.csv", index=False
+    )
+    
+    
+    id_col = None
+    for potential_id in ['Material_ID', 'Config_ID', 'Compound_ID', 'ID']:
+        if potential_id in df_dedup.columns:
+            id_col = potential_id
+            break
+            
+    if id_col:
+        retained_ids = df_dedup[[id_col, COL_A, COL_B, COL_LATTICE_A, COL_LATTICE_B, COL_LATTICE_C]]
+    else:
+        # If no explicit ID, use the DataFrame index as the identifier
+        retained_ids = df_dedup.reset_index()[['index', COL_A, COL_B, COL_LATTICE_A, COL_LATTICE_B, COL_LATTICE_C]]
+        retained_ids.rename(columns={'index': 'Record_Index'}, inplace=True)
+        
+    retained_ids.to_csv(f"{OUTPUT_DIR}/retained_compound_identifiers.csv", index=False)
+
+    print("==================================================")
+    print(f"SUCCESS: Files saved to {OUTPUT_DIR}")
+    print("- retained_1892_records.csv")
+    print("- unique_ab_pairs.csv")
+    print("- retained_compound_identifiers.csv")
+    print("==================================================")
+
+if __name__ == "__main__":
+    run_filtering_pipeline()
